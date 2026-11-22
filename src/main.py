@@ -44,6 +44,7 @@ def _read_yaml(path: Path) -> dict:
 
 
 def run(html_path: str | None) -> int:
+    session = None
     if html_path:
         html = Path(html_path).read_text(encoding="utf-8", errors="replace")
     else:
@@ -51,11 +52,15 @@ def run(html_path: str | None) -> int:
         password = os.environ.get("SCHOOL_PASS", "")
         if not user or not password:
             raise LoginError("缺少 SCHOOL_USER / SCHOOL_PASS")
-        html = fetch_exam_table(create_session(user, password))
+        session = create_session(user, password)
+        html = fetch_exam_table(session)
 
     exams = parse_exam_table(html)
     if not exams:
-        raise FetchError("考试页面解析到 0 场考试，未写入文件（避免清空已有日历）")
+        probe = getattr(session, "exam_probe", "") if session else ""
+        raise FetchError(
+            "考试页面解析到 0 场考试，未写入文件（避免清空已有日历）；" + probe
+        )
 
     settings = _read_yaml(CONFIG_DIR / "settings.yaml")
     calendar = build_calendar(exams, settings)

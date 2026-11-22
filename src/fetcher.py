@@ -219,7 +219,7 @@ def _looks_like_login(text: str) -> bool:
 
 
 def _is_exam_page(text: str) -> bool:
-    return "考场座位号" in text
+    return "考场座位号" in text and 'class="griddata' in text
 
 
 _DIAG_MARKERS = (
@@ -258,6 +258,14 @@ def _diag(response: requests.Response) -> str:
 def fetch_exam_table(session: requests.Session) -> str:
     probes: list[str] = []
     headers = {"Referer": f"{EAMS_BASE}/eams/homeExt.action"}
+    semester_id: str | None = None
+    batch_id: str | None = None
+
+    def hit(response: requests.Response, label: str) -> str:
+        session.exam_probe = (
+            f"hit={label} semester={semester_id} batch={batch_id} | " + " | ".join(probes)
+        )
+        return response.text
 
     def get(url: str, label: str, params: dict | None = None) -> requests.Response:
         response = _request(session, "GET", url, params=params, headers=headers)
@@ -273,7 +281,7 @@ def fetch_exam_table(session: requests.Session) -> str:
 
     shell = get(EXAM_SHELL_URL, "shell")
     if _is_exam_page(shell.text):
-        return shell.text
+        return hit(shell, "shell")
     semester_id = semester_id or parse_semester_id(shell.text)
     batch_id = parse_exam_batch_id(shell.text)
 
@@ -283,12 +291,12 @@ def fetch_exam_table(session: requests.Session) -> str:
             EXAM_TABLE_URL, f"table-batch{batch_id}", {"examBatch.id": batch_id}
         )
         if _is_exam_page(table.text):
-            return table.text
+            return hit(table, f"table-batch{batch_id}")
         semester_id = semester_id or parse_semester_id(table.text)
 
     table = get(EXAM_TABLE_URL, "table")
     if _is_exam_page(table.text):
-        return table.text
+        return hit(table, "table")
     semester_id = semester_id or parse_semester_id(table.text)
 
     form = {"project.id": "1"}
@@ -303,17 +311,18 @@ def fetch_exam_table(session: requests.Session) -> str:
     if _looks_like_login(submitted.text):
         raise LoginError("提交学期条件后要求重新登录")
     if _is_exam_page(submitted.text):
-        return submitted.text
+        return hit(submitted, "shell-post")
 
     posted_batch = parse_exam_batch_id(submitted.text)
     if posted_batch and posted_batch != batch_id:
+        batch_id = posted_batch
         table = get(
             EXAM_TABLE_URL,
             f"table-posted-batch{posted_batch}",
             {"examBatch.id": posted_batch},
         )
         if _is_exam_page(table.text):
-            return table.text
+            return hit(table, f"table-posted-batch{posted_batch}")
 
     raise FetchError(
         "考试页中没有找到「考场座位号」表格；"
