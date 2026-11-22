@@ -126,23 +126,6 @@ def _cas_probe(response: requests.Response, note: str, session: requests.Session
     )
 
 
-def _select_user_category(session: requests.Session, text: str) -> str | None:
-    found = re.search(
-        r'name=["\']security\.userCategoryId["\'][^>]*value=["\'](\d+)', text
-    )
-    if not found:
-        return None
-    value = found.group(1)
-    _request(
-        session,
-        "POST",
-        f"{EAMS_BASE}/eams/homeExt.action",
-        data={"security.userCategoryId": value},
-        headers={"Referer": f"{EAMS_BASE}/eams/homeExt.action"},
-    )
-    return value
-
-
 def create_session(username: str, password: str) -> requests.Session:
     session = requests.Session()
     session.headers.update(_headers())
@@ -223,16 +206,11 @@ def create_session(username: str, password: str) -> requests.Session:
     session.cas_probe = " || ".join(probes)
 
     _request(session, "GET", SERVICE_URL, headers=_headers(f"{AUTH_BASE}/authserver/login"))
-    category = _select_user_category(session, landing.text)
     home = _request(session, "GET", f"{EAMS_BASE}/eams/homeExt.action", headers=_headers())
     home.encoding = "utf-8"
-    if "security.userCategoryId" in home.text:
-        category = _select_user_category(session, home.text) or category
-        home = _request(session, "GET", f"{EAMS_BASE}/eams/homeExt.action", headers=_headers())
-        home.encoding = "utf-8"
     session.eams_probe = (
         f"home={home.status_code}{urlsplit(home.url).path} len={len(home.text)} "
-        f"category={category or ''} mytable={'courseTableForStd' in home.text} "
+        f"mytable={'courseTableForStd' in home.text} "
         f"login={'统一身份认证' in home.text}"
     )
     return session
@@ -243,7 +221,7 @@ def _looks_like_login(text: str) -> bool:
 
 
 def _is_exam_page(text: str) -> bool:
-    return "考场座位号" in text and 'class="griddata' in text
+    return "考场座位号" in text and "<td" in text
 
 
 _DIAG_MARKERS = (
@@ -291,8 +269,9 @@ def _diag(response: requests.Response) -> str:
         f"{hop.status_code}{urlsplit(hop.url).path}" for hop in response.history + [response]
     )
     marks = ",".join(word for word in _DIAG_MARKERS if word in text)
+    grid_rows = len(re.findall(r"<tr[^>]*class=[\"']?[^\"'>]*griddata", text))
     return (
-        f"{chain} len={len(text)} rows={text.count('class=\"griddata')} "
+        f"{chain} len={len(text)} rows={grid_rows} "
         f"trs={text.count('<tr')} tds={text.count('<td')} "
         f"title={(title.group(1).strip()[:30] if title else '')} marks={marks} "
         f"ctype={response.headers.get('Content-Type', '')} {_shape(text)}"
@@ -326,14 +305,6 @@ def fetch_exam_table(session: requests.Session) -> str:
             raise LoginError("未获得教务系统会话，登录流程未生效")
         return response
 
-    def post(url: str, label: str, data: dict) -> requests.Response:
-        response = _request(session, "POST", url, data=data, headers={"Referer": url})
-        response.encoding = "utf-8"
-        probes.append(f"{label}={_diag(response)}")
-        if _looks_like_login(response.text):
-            raise LoginError("提交学期条件后要求重新登录")
-        return response
-
     # 课表页是同一会话下已知可用的参照，也能顺带拿到当前学期 ID
     course = get(f"{EAMS_BASE}/eams/courseTableForStd.action", "course")
     semester_id = parse_semester_id(course.text)
@@ -343,18 +314,6 @@ def fetch_exam_table(session: requests.Session) -> str:
         return hit(shell, "shell")
     semester_id = semester_id or parse_semester_id(shell.text)
     batch_id = parse_exam_batch_id(shell.text)
-
-    # 考试页依赖会话里的学期上下文，先按页面表单提交一次学期
-    if semester_id:
-        submitted = post(
-            EXAM_SHELL_URL,
-            "shell-post",
-            {"project.id": "1", "semester.id": semester_id},
-        )
-        if _is_exam_page(submitted.text):
-            return hit(submitted, "shell-post")
-        semester_id = semester_id or parse_semester_id(submitted.text)
-        batch_id = parse_exam_batch_id(submitted.text) or batch_id
 
     # 外壳页只负责加载，表格由 examBatch.id 对应的子页面渲染
     if batch_id:

@@ -98,3 +98,14 @@ def test_parse_semester_id_from_calendar():
 def test_parse_exam_batch_id():
     html = "<script>bg.Go('/eams/stdExamTable!examTable.action?examBatch.id=1087','contentDiv')</script>"
     assert parse_exam_batch_id(html) == "1087"
+
+
+def test_unquoted_grid_attributes():
+    html = """<table class=gridtable id=grid1><thead><tr><th>考场座位号</th></tr></thead>
+<tbody id=grid1_data>
+<tr class=griddata-even><td>X003.001</td><td>示例课程三</td><td>期末考试</td><td>2027-01-16</td><td>08:00~09:40</td><td>A101(鹤壁工程技术学院 1号教学楼)</td><td>7</td><td>正常</td><td></td></tr>
+</tbody></table>"""
+    exams = parse_exam_table(html)
+    assert len(exams) == 1
+    assert exams[0].seat == "7"
+    assert exams[0].room == "A101(1号教学楼)"

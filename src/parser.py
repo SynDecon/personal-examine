@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from datetime import date, time
 
 _EXAM_HEADER = "考场座位号"
-_ROW_RE = re.compile(r'<tr class="griddata[^"]*">(.*?)</tr>', re.S)
+_GRID_TABLE_RE = re.compile(r'<table[^>]*\bid=["\']?grid[^"\'>]*["\']?[^>]*>(.*?)</table>', re.S)
+_ROW_RE = re.compile(r"<tr[^>]*>(.*?)</tr>", re.S)
 _CELL_RE = re.compile(r"<td[^>]*>(.*?)</td>", re.S)
 _TAG_RE = re.compile(r"<[^>]+>")
 _DATE_RE = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
@@ -96,7 +97,9 @@ def parse_exam_table(html: str) -> list[Exam]:
 
     exams: list[Exam] = []
     seen: set[tuple] = set()
-    for row in _ROW_RE.findall(html):
+    grid = _GRID_TABLE_RE.search(html)
+    scope = grid.group(1) if grid else html
+    for row in _ROW_RE.findall(scope):
         exam = _parse_row(row)
         if exam is None:
             continue
