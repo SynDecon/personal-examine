@@ -2,8 +2,8 @@ name: 更新考试日程
 
 on:
   schedule:
-    # 每天 18:00 UTC（北京 02:00），下面 gate 步骤只放行北京 1 号、15 号
-    - cron: "0 18 * * *"
+    # 每天 19:30 UTC（北京 03:30），与课表仓库的 02:00 错开；下面 gate 只放行北京 1 号、15 号
+    - cron: "30 19 * * *"
   workflow_dispatch:
 
 permissions:

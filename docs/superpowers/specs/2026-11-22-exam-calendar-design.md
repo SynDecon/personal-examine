@@ -46,7 +46,7 @@ tests/                 # 合成 HTML fixture，不含真实页面
 
 ## 刷新与发布
 
-- cron `0 18 * * *`（北京 02:00），workflow 第一步判断北京日期是否为 1 号或 15 号，否则跳过；`workflow_dispatch` 无条件执行
+- cron `30 19 * * *`（北京 03:30，与课表仓库的 02:00 错开），workflow 第一步判断北京日期是否为 1 号或 15 号，否则跳过；`workflow_dispatch` 无条件执行
 - 这样避开「每月 1/15」在二月、小月的 cron 陷阱
 - 成功后用 Pages artifact 发布整个 `output/` 目录
 
