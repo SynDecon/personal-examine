@@ -9,12 +9,13 @@ import requests
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 
-from .parser import parse_semester_id
+from .parser import parse_exam_batch_id, parse_semester_id
 
 AUTH_BASE = "http://39.164.230.243:9527"
 EAMS_BASE = "http://39.164.230.243:91"
 SERVICE_URL = f"{EAMS_BASE}/eams/login.action"
-EXAM_URL = f"{EAMS_BASE}/eams/stdExamTable.action"
+EXAM_SHELL_URL = f"{EAMS_BASE}/eams/stdExamTable.action"
+EXAM_TABLE_URL = f"{EAMS_BASE}/eams/stdExamTable!examTable.action"
 AES_KEY = b"jsmituluzhou2024"
 TIMEOUT = 30
 
@@ -256,54 +257,67 @@ def _diag(response: requests.Response) -> str:
 
 def fetch_exam_table(session: requests.Session) -> str:
     probes: list[str] = []
+    headers = {"Referer": f"{EAMS_BASE}/eams/homeExt.action"}
 
-    # 课表页是同一会话下已知可用的参照：既能判断会话是否有效，也能拿到当前学期 ID
-    course = _request(
-        session,
-        "GET",
-        f"{EAMS_BASE}/eams/courseTableForStd.action",
-        headers={"Referer": f"{EAMS_BASE}/eams/homeExt.action"},
-    )
-    course.encoding = "utf-8"
-    probes.append("course=" + _diag(course))
+    def get(url: str, label: str, params: dict | None = None) -> requests.Response:
+        response = _request(session, "GET", url, params=params, headers=headers)
+        response.encoding = "utf-8"
+        probes.append(f"{label}={_diag(response)}")
+        if _looks_like_login(response.text):
+            raise LoginError("未获得教务系统会话，登录流程未生效")
+        return response
+
+    # 课表页是同一会话下已知可用的参照，也能顺带拿到当前学期 ID
+    course = get(f"{EAMS_BASE}/eams/courseTableForStd.action", "course")
     semester_id = parse_semester_id(course.text)
 
-    page = _request(
-        session, "GET", EXAM_URL, headers={"Referer": f"{EAMS_BASE}/eams/homeExt.action"}
-    )
-    page.encoding = "utf-8"
-    probes.append("exam-get=" + _diag(page))
-    if _looks_like_login(page.text):
-        raise LoginError("未获得教务系统会话，登录流程未生效")
-    if _is_exam_page(page.text):
-        return page.text
-    semester_id = semester_id or parse_semester_id(page.text)
+    shell = get(EXAM_SHELL_URL, "shell")
+    if _is_exam_page(shell.text):
+        return shell.text
+    semester_id = semester_id or parse_semester_id(shell.text)
+    batch_id = parse_exam_batch_id(shell.text)
+
+    # 外壳页只负责加载，表格由 examBatch.id 对应的子页面渲染
+    if batch_id:
+        table = get(
+            EXAM_TABLE_URL, f"table-batch{batch_id}", {"examBatch.id": batch_id}
+        )
+        if _is_exam_page(table.text):
+            return table.text
+        semester_id = semester_id or parse_semester_id(table.text)
+
+    table = get(EXAM_TABLE_URL, "table")
+    if _is_exam_page(table.text):
+        return table.text
+    semester_id = semester_id or parse_semester_id(table.text)
 
     form = {"project.id": "1"}
     if semester_id:
         form["semester.id"] = semester_id
 
     submitted = _request(
-        session, "POST", EXAM_URL, data=form, headers={"Referer": EXAM_URL}
+        session, "POST", EXAM_SHELL_URL, data=form, headers={"Referer": EXAM_SHELL_URL}
     )
     submitted.encoding = "utf-8"
-    probes.append("exam-post=" + _diag(submitted))
+    probes.append("shell-post=" + _diag(submitted))
     if _looks_like_login(submitted.text):
         raise LoginError("提交学期条件后要求重新登录")
     if _is_exam_page(submitted.text):
         return submitted.text
 
-    table = _request(
-        session, "GET", EXAM_URL, params=form, headers={"Referer": EXAM_URL}
-    )
-    table.encoding = "utf-8"
-    probes.append("exam-get2=" + _diag(table))
-    if _is_exam_page(table.text):
-        return table.text
+    posted_batch = parse_exam_batch_id(submitted.text)
+    if posted_batch and posted_batch != batch_id:
+        table = get(
+            EXAM_TABLE_URL,
+            f"table-posted-batch{posted_batch}",
+            {"examBatch.id": posted_batch},
+        )
+        if _is_exam_page(table.text):
+            return table.text
 
     raise FetchError(
         "考试页中没有找到「考场座位号」表格；"
-        f"semester={semester_id}；" + " | ".join(probes) + " | "
+        f"semester={semester_id} batch={batch_id}；" + " | ".join(probes) + " | "
         f"{getattr(session, 'signin_probe', '')} | "
         f"{getattr(session, 'cas_probe', '')} | {getattr(session, 'eams_probe', '')}"
     )

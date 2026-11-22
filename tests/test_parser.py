@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.parser import parse_exam_table, parse_semester_id
+from src.parser import parse_exam_batch_id, parse_exam_table, parse_semester_id
 
 FIXTURE = """
 <html><body>
@@ -88,3 +88,8 @@ def test_parse_semester_id():
 def test_parse_semester_id_from_js():
     html = '<script>getSemesters(el,{empty:"false",value:"322"},"");</script>'
     assert parse_semester_id(html) == "322"
+
+
+def test_parse_exam_batch_id():
+    html = "<script>bg.Go('/eams/stdExamTable!examTable.action?examBatch.id=1087','contentDiv')</script>"
+    assert parse_exam_batch_id(html) == "1087"

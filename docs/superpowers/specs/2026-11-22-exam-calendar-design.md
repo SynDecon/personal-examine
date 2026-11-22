@@ -11,6 +11,7 @@
 ## 数据源
 
 - 教务入口：`http://39.164.230.243:91/eams/stdExamTable.action`（首页 iframe「我的考试」）
+- 外壳页只负责加载，表格由 `stdExamTable!examTable.action?examBatch.id=<id>` 渲染；批次 ID 从外壳脚本的 `bg.Go(...)` 解析
 - 登录：与课表仓库相同的 CAS SPA（`http://39.164.230.243:9527`），`create_session()` 原样复用
 - 学期：页面隐藏字段 `semester.id`（当前 322），每次运行动态解析，不写死
 - 表格无分页；页面不含学号/姓名
