@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import html as html_lib
 import re
+import time
 from urllib.parse import quote, urljoin, urlsplit
 
 import requests
@@ -249,7 +250,10 @@ _DIAG_MARKERS = (
     "考场座位号",
     "学年学期",
     "semesterBar",
+    "semesterCalendar",
     "gridtable",
+    "contentDiv",
+    "dataQuery",
     "TaskActivity",
     "courseTableForStd",
     "stdExamTable",
@@ -262,7 +266,22 @@ _DIAG_MARKERS = (
     "超时",
     "错误",
     "异常",
+    "无数据",
+    "暂无",
+    "请选择",
+    "session",
+    "student",
 )
+
+
+def _shape(text: str) -> str:
+    forms = re.findall(r"<form[^>]*action=[\"']([^\"']*)", text, re.I)
+    iframes = re.findall(r"<iframe[^>]*src=[\"']([^\"']*)", text, re.I)
+    inputs = re.findall(r"<input[^>]*name=[\"']([^\"']+)", text, re.I)
+    return (
+        f"forms={','.join(forms[:3])} iframes={','.join(iframes[:3])} "
+        f"inputs={','.join(inputs[:10])} scripts={text.count('<script')}"
+    )
 
 
 def _diag(response: requests.Response) -> str:
@@ -274,8 +293,9 @@ def _diag(response: requests.Response) -> str:
     marks = ",".join(word for word in _DIAG_MARKERS if word in text)
     return (
         f"{chain} len={len(text)} rows={text.count('class=\"griddata')} "
+        f"trs={text.count('<tr')} tds={text.count('<td')} "
         f"title={(title.group(1).strip()[:30] if title else '')} marks={marks} "
-        f"ctype={response.headers.get('Content-Type', '')}"
+        f"ctype={response.headers.get('Content-Type', '')} {_shape(text)}"
     )
 
 
@@ -290,13 +310,15 @@ def fetch_exam_table(session: requests.Session) -> str:
         )
         return response.text
 
-    def get(url: str, label: str, params: dict | None = None) -> requests.Response:
+    def get(
+        url: str, label: str, params: dict | None = None, referer: str | None = None
+    ) -> requests.Response:
         response = _request(
             session,
             "GET",
             url,
             params=params,
-            headers={"Referer": f"{EAMS_BASE}/eams/homeExt.action"},
+            headers={"Referer": referer or f"{EAMS_BASE}/eams/homeExt.action"},
         )
         response.encoding = "utf-8"
         probes.append(f"{label}={_diag(response)}")
@@ -336,10 +358,15 @@ def fetch_exam_table(session: requests.Session) -> str:
 
     # 外壳页只负责加载，表格由 examBatch.id 对应的子页面渲染
     if batch_id:
-        params = {"examBatch.id": batch_id}
+        params = {"examBatch.id": batch_id, "_": str(int(time.time() * 1000))}
         if semester_id:
             params["semester.id"] = semester_id
-        table = get(EXAM_TABLE_URL, f"table-batch{batch_id}", params)
+        table = get(
+            EXAM_TABLE_URL,
+            f"table-batch{batch_id}",
+            params,
+            referer=EXAM_SHELL_URL,
+        )
         if _is_exam_page(table.text):
             return hit(table, f"table-batch{batch_id}")
         semester_id = semester_id or parse_semester_id(table.text)
