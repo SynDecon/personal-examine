@@ -125,6 +125,23 @@ def _cas_probe(response: requests.Response, note: str, session: requests.Session
     )
 
 
+def _select_user_category(session: requests.Session, text: str) -> str | None:
+    found = re.search(
+        r'name=["\']security\.userCategoryId["\'][^>]*value=["\'](\d+)', text
+    )
+    if not found:
+        return None
+    value = found.group(1)
+    _request(
+        session,
+        "POST",
+        f"{EAMS_BASE}/eams/homeExt.action",
+        data={"security.userCategoryId": value},
+        headers={"Referer": f"{EAMS_BASE}/eams/homeExt.action"},
+    )
+    return value
+
+
 def create_session(username: str, password: str) -> requests.Session:
     session = requests.Session()
     session.headers.update(_headers())
@@ -205,11 +222,17 @@ def create_session(username: str, password: str) -> requests.Session:
     session.cas_probe = " || ".join(probes)
 
     _request(session, "GET", SERVICE_URL, headers=_headers(f"{AUTH_BASE}/authserver/login"))
+    category = _select_user_category(session, landing.text)
     home = _request(session, "GET", f"{EAMS_BASE}/eams/homeExt.action", headers=_headers())
     home.encoding = "utf-8"
+    if "security.userCategoryId" in home.text:
+        category = _select_user_category(session, home.text) or category
+        home = _request(session, "GET", f"{EAMS_BASE}/eams/homeExt.action", headers=_headers())
+        home.encoding = "utf-8"
     session.eams_probe = (
         f"home={home.status_code}{urlsplit(home.url).path} len={len(home.text)} "
-        f"mytable={'courseTableForStd' in home.text} login={'统一身份认证' in home.text}"
+        f"category={category or ''} mytable={'courseTableForStd' in home.text} "
+        f"login={'统一身份认证' in home.text}"
     )
     return session
 
@@ -230,6 +253,7 @@ _DIAG_MARKERS = (
     "TaskActivity",
     "courseTableForStd",
     "stdExamTable",
+    "security.userCategoryId",
     "Central Authentication Service",
     "统一身份认证",
     "无权",
