@@ -221,24 +221,64 @@ def _is_exam_page(text: str) -> bool:
     return "考场座位号" in text
 
 
+_DIAG_MARKERS = (
+    "考场座位号",
+    "学年学期",
+    "semesterBar",
+    "gridtable",
+    "TaskActivity",
+    "courseTableForStd",
+    "stdExamTable",
+    "Central Authentication Service",
+    "统一身份认证",
+    "无权",
+    "权限",
+    "登录",
+    "超时",
+    "错误",
+    "异常",
+)
+
+
 def _diag(response: requests.Response) -> str:
     text = response.text
+    title = re.search(r"<title>(.*?)</title>", text, re.S | re.I)
+    chain = ">".join(
+        f"{hop.status_code}{urlsplit(hop.url).path}" for hop in response.history + [response]
+    )
+    marks = ",".join(word for word in _DIAG_MARKERS if word in text)
     return (
-        f"status={response.status_code} path={urlsplit(response.url).path} "
-        f"len={len(text)} rows={text.count('class=\"griddata')} "
-        f"exam={_is_exam_page(text)} login={_looks_like_login(text)}"
+        f"{chain} len={len(text)} rows={text.count('class=\"griddata')} "
+        f"title={(title.group(1).strip()[:30] if title else '')} marks={marks} "
+        f"ctype={response.headers.get('Content-Type', '')}"
     )
 
 
 def fetch_exam_table(session: requests.Session) -> str:
-    page = _request(session, "GET", EXAM_URL)
+    probes: list[str] = []
+
+    # 课表页是同一会话下已知可用的参照：既能判断会话是否有效，也能拿到当前学期 ID
+    course = _request(
+        session,
+        "GET",
+        f"{EAMS_BASE}/eams/courseTableForStd.action",
+        headers={"Referer": f"{EAMS_BASE}/eams/homeExt.action"},
+    )
+    course.encoding = "utf-8"
+    probes.append("course=" + _diag(course))
+    semester_id = parse_semester_id(course.text)
+
+    page = _request(
+        session, "GET", EXAM_URL, headers={"Referer": f"{EAMS_BASE}/eams/homeExt.action"}
+    )
     page.encoding = "utf-8"
+    probes.append("exam-get=" + _diag(page))
     if _looks_like_login(page.text):
         raise LoginError("未获得教务系统会话，登录流程未生效")
     if _is_exam_page(page.text):
         return page.text
+    semester_id = semester_id or parse_semester_id(page.text)
 
-    semester_id = parse_semester_id(page.text)
     form = {"project.id": "1"}
     if semester_id:
         form["semester.id"] = semester_id
@@ -247,6 +287,7 @@ def fetch_exam_table(session: requests.Session) -> str:
         session, "POST", EXAM_URL, data=form, headers={"Referer": EXAM_URL}
     )
     submitted.encoding = "utf-8"
+    probes.append("exam-post=" + _diag(submitted))
     if _looks_like_login(submitted.text):
         raise LoginError("提交学期条件后要求重新登录")
     if _is_exam_page(submitted.text):
@@ -256,12 +297,13 @@ def fetch_exam_table(session: requests.Session) -> str:
         session, "GET", EXAM_URL, params=form, headers={"Referer": EXAM_URL}
     )
     table.encoding = "utf-8"
+    probes.append("exam-get2=" + _diag(table))
     if _is_exam_page(table.text):
         return table.text
 
-    detail = " | ".join(_diag(response) for response in (page, submitted, table))
     raise FetchError(
-        f"考试页中没有找到「考场座位号」表格；semester={semester_id}；{detail} | "
+        "考试页中没有找到「考场座位号」表格；"
+        f"semester={semester_id}；" + " | ".join(probes) + " | "
         f"{getattr(session, 'signin_probe', '')} | "
         f"{getattr(session, 'cas_probe', '')} | {getattr(session, 'eams_probe', '')}"
     )

@@ -83,3 +83,8 @@ def test_bad_time_raises():
 
 def test_parse_semester_id():
     assert parse_semester_id(FIXTURE) == "322"
+
+
+def test_parse_semester_id_from_js():
+    html = '<script>getSemesters(el,{empty:"false",value:"322"},"");</script>'
+    assert parse_semester_id(html) == "322"

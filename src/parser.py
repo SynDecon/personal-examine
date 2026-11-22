@@ -13,6 +13,7 @@ _DATE_RE = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
 _TIME_RANGE_RE = re.compile(r"(\d{1,2}):(\d{2})\s*[~～\-–—至]\s*(\d{1,2}):(\d{2})")
 _SEMESTER_INPUT_RE = re.compile(r'name="semester\.id"[^>]*value="(\d+)"')
 _SEMESTER_TEXT_RE = re.compile(r"semester\.id=(\d+)")
+_SEMESTER_JS_RE = re.compile(r'getSemesters\([^)]*?value\s*:\s*"(\d+)"')
 
 
 @dataclass
@@ -41,8 +42,11 @@ def _normalize_room(room: str) -> str:
 
 
 def parse_semester_id(html: str) -> str | None:
-    found = _SEMESTER_INPUT_RE.search(html) or _SEMESTER_TEXT_RE.search(html)
-    return found.group(1) if found else None
+    for pattern in (_SEMESTER_INPUT_RE, _SEMESTER_TEXT_RE, _SEMESTER_JS_RE):
+        found = pattern.search(html)
+        if found:
+            return found.group(1)
+    return None
 
 
 def _parse_row(row: str) -> Exam | None:
