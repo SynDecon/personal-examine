@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+output/*.tmp
+output/debug/
+_debug_fetch.py
+*教务管理系统.html
+*教务管理系统_files/

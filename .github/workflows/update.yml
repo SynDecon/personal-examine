@@ -1,0 +1,75 @@
+name: 更新考试日程
+
+on:
+  schedule:
+    # 每天 18:00 UTC（北京 02:00），下面 gate 步骤只放行北京 1 号、15 号
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 判断是否刷新日
+        id: gate
+        run: |
+          day=$(TZ=Asia/Shanghai date +%d)
+          if [ "$day" = "01" ] || [ "$day" = "15" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "刷新日：北京 $day 日"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "非刷新日（北京 $day 日），跳过"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: 安装依赖
+        if: steps.gate.outputs.run == 'true'
+        run: pip install -r requirements.txt
+
+      - name: 抓取并生成
+        id: fetch
+        if: steps.gate.outputs.run == 'true'
+        env:
+          SCHOOL_USER: ${{ secrets.SCHOOL_USER }}
+          SCHOOL_PASS: ${{ secrets.SCHOOL_PASS }}
+        run: python -m src.main
+
+      - name: 打包
+        if: steps.fetch.outputs.valid == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: output
+
+      - name: 发布
+        if: steps.fetch.outputs.valid == 'true'
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: 错误信息
+        if: failure()
+        run: echo "::error::考试同步失败，线上文件未更新。${{ steps.fetch.outputs.error }}"
+
+      - name: 清理缓存
+        if: always()
+        run: rm -rf src/__pycache__ .cache output/*.tmp
