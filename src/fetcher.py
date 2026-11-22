@@ -257,7 +257,6 @@ def _diag(response: requests.Response) -> str:
 
 def fetch_exam_table(session: requests.Session) -> str:
     probes: list[str] = []
-    headers = {"Referer": f"{EAMS_BASE}/eams/homeExt.action"}
     semester_id: str | None = None
     batch_id: str | None = None
 
@@ -268,11 +267,25 @@ def fetch_exam_table(session: requests.Session) -> str:
         return response.text
 
     def get(url: str, label: str, params: dict | None = None) -> requests.Response:
-        response = _request(session, "GET", url, params=params, headers=headers)
+        response = _request(
+            session,
+            "GET",
+            url,
+            params=params,
+            headers={"Referer": f"{EAMS_BASE}/eams/homeExt.action"},
+        )
         response.encoding = "utf-8"
         probes.append(f"{label}={_diag(response)}")
         if _looks_like_login(response.text):
             raise LoginError("未获得教务系统会话，登录流程未生效")
+        return response
+
+    def post(url: str, label: str, data: dict) -> requests.Response:
+        response = _request(session, "POST", url, data=data, headers={"Referer": url})
+        response.encoding = "utf-8"
+        probes.append(f"{label}={_diag(response)}")
+        if _looks_like_login(response.text):
+            raise LoginError("提交学期条件后要求重新登录")
         return response
 
     # 课表页是同一会话下已知可用的参照，也能顺带拿到当前学期 ID
@@ -285,11 +298,24 @@ def fetch_exam_table(session: requests.Session) -> str:
     semester_id = semester_id or parse_semester_id(shell.text)
     batch_id = parse_exam_batch_id(shell.text)
 
+    # 考试页依赖会话里的学期上下文，先按页面表单提交一次学期
+    if semester_id:
+        submitted = post(
+            EXAM_SHELL_URL,
+            "shell-post",
+            {"project.id": "1", "semester.id": semester_id},
+        )
+        if _is_exam_page(submitted.text):
+            return hit(submitted, "shell-post")
+        semester_id = semester_id or parse_semester_id(submitted.text)
+        batch_id = parse_exam_batch_id(submitted.text) or batch_id
+
     # 外壳页只负责加载，表格由 examBatch.id 对应的子页面渲染
     if batch_id:
-        table = get(
-            EXAM_TABLE_URL, f"table-batch{batch_id}", {"examBatch.id": batch_id}
-        )
+        params = {"examBatch.id": batch_id}
+        if semester_id:
+            params["semester.id"] = semester_id
+        table = get(EXAM_TABLE_URL, f"table-batch{batch_id}", params)
         if _is_exam_page(table.text):
             return hit(table, f"table-batch{batch_id}")
         semester_id = semester_id or parse_semester_id(table.text)
@@ -298,31 +324,6 @@ def fetch_exam_table(session: requests.Session) -> str:
     if _is_exam_page(table.text):
         return hit(table, "table")
     semester_id = semester_id or parse_semester_id(table.text)
-
-    form = {"project.id": "1"}
-    if semester_id:
-        form["semester.id"] = semester_id
-
-    submitted = _request(
-        session, "POST", EXAM_SHELL_URL, data=form, headers={"Referer": EXAM_SHELL_URL}
-    )
-    submitted.encoding = "utf-8"
-    probes.append("shell-post=" + _diag(submitted))
-    if _looks_like_login(submitted.text):
-        raise LoginError("提交学期条件后要求重新登录")
-    if _is_exam_page(submitted.text):
-        return hit(submitted, "shell-post")
-
-    posted_batch = parse_exam_batch_id(submitted.text)
-    if posted_batch and posted_batch != batch_id:
-        batch_id = posted_batch
-        table = get(
-            EXAM_TABLE_URL,
-            f"table-posted-batch{posted_batch}",
-            {"examBatch.id": posted_batch},
-        )
-        if _is_exam_page(table.text):
-            return hit(table, f"table-posted-batch{posted_batch}")
 
     raise FetchError(
         "考试页中没有找到「考场座位号」表格；"

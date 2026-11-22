@@ -14,6 +14,7 @@ _TIME_RANGE_RE = re.compile(r"(\d{1,2}):(\d{2})\s*[~～\-–—至]\s*(\d{1,2}):
 _SEMESTER_INPUT_RE = re.compile(r'name="semester\.id"[^>]*value="(\d+)"')
 _SEMESTER_TEXT_RE = re.compile(r"semester\.id=(\d+)")
 _SEMESTER_JS_RE = re.compile(r'getSemesters\([^)]*?value\s*:\s*"(\d+)"')
+_SEMESTER_CALENDAR_RE = re.compile(r'semesterCalendar\(\{[^}]*?value\s*:\s*"(\d+)"')
 _EXAM_BATCH_RE = re.compile(r"examBatch\.id=(\d+)")
 
 
@@ -43,7 +44,12 @@ def _normalize_room(room: str) -> str:
 
 
 def parse_semester_id(html: str) -> str | None:
-    for pattern in (_SEMESTER_INPUT_RE, _SEMESTER_TEXT_RE, _SEMESTER_JS_RE):
+    for pattern in (
+        _SEMESTER_INPUT_RE,
+        _SEMESTER_TEXT_RE,
+        _SEMESTER_JS_RE,
+        _SEMESTER_CALENDAR_RE,
+    ):
         found = pattern.search(html)
         if found:
             return found.group(1)

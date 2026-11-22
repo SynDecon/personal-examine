@@ -90,6 +90,11 @@ def test_parse_semester_id_from_js():
     assert parse_semester_id(html) == "322"
 
 
+def test_parse_semester_id_from_calendar():
+    html = '<script>jQuery("#semesterBar").semesterCalendar({empty:"false",onChange:"",value:"322"},"");</script>'
+    assert parse_semester_id(html) == "322"
+
+
 def test_parse_exam_batch_id():
     html = "<script>bg.Go('/eams/stdExamTable!examTable.action?examBatch.id=1087','contentDiv')</script>"
     assert parse_exam_batch_id(html) == "1087"
